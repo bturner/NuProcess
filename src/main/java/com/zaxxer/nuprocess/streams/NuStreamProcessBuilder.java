@@ -44,15 +44,18 @@ public class NuStreamProcessBuilder
    {
       NuStreamProcessImpl streamProcess = new NuStreamProcessImpl();
 
-      builder.setProcessListener(new StreamProcessHandler(streamProcess, streamProcessHandler));
+      BridgeProcessHandler bridgeProcessHandler = new BridgeProcessHandler(streamProcess, streamProcessHandler);
+      builder.setProcessListener(bridgeProcessHandler);
+
       NuProcess nuProcess = builder.start();
 
-      streamProcess.setStreamProcessHandler(nuProcess);
+      streamProcess.setNuProcess(nuProcess);
+      streamProcess.setStreamProcessHandler(bridgeProcessHandler);
 
       return streamProcess;
    }
 
-   static class StreamProcessHandler extends NuAbstractProcessHandler
+   static class BridgeProcessHandler extends NuAbstractProcessHandler
    {
       private final AtomicLong stdinRequests;
       private final AtomicLong stdoutRequests;
@@ -65,7 +68,7 @@ public class NuStreamProcessBuilder
       private Subscriber<? super ByteBuffer> stdoutSubscriber;
       private Subscriber<? super ByteBuffer> stderrSubscriber;
 
-      public StreamProcessHandler(final NuStreamProcess streamProcess, final NuStreamProcessHandler streamProcessHandler)
+      public BridgeProcessHandler(final NuStreamProcess streamProcess, final NuStreamProcessHandler streamProcessHandler)
       {
          this.streamProcessHandler = streamProcessHandler;
          this.streamProcess = streamProcess;
@@ -112,7 +115,9 @@ public class NuStreamProcessBuilder
       @Override
       public boolean onStdout(final ByteBuffer buffer, final boolean closed)
       {
-         stdoutSubscriber.onNext(buffer);
+         if (buffer.hasRemaining()) {
+            stdoutSubscriber.onNext(buffer);
+         }
 
          if (closed) {
             stdoutSubscriber.onComplete();

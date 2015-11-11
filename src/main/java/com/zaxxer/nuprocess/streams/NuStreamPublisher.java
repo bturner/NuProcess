@@ -23,14 +23,14 @@ import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
 import com.zaxxer.nuprocess.NuProcess.Stream;
-import com.zaxxer.nuprocess.streams.NuStreamProcessBuilder.StreamProcessHandler;
+import com.zaxxer.nuprocess.streams.NuStreamProcessBuilder.BridgeProcessHandler;
 
 public class NuStreamPublisher implements Publisher<ByteBuffer>
 {
-   private final StreamProcessHandler processHandler;
+   private final BridgeProcessHandler processHandler;
    private Stream stream;
 
-   NuStreamPublisher(final StreamProcessHandler processHandler, final Stream stream)
+   NuStreamPublisher(final BridgeProcessHandler processHandler, final Stream stream)
    {
       this.processHandler = processHandler;
       this.stream = stream;

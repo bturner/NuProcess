@@ -80,6 +80,7 @@ public final class NuCharsetDecoder
     * @param buffer {@link ByteBuffer} which received bytes from stdout or
     *        stderr
     * @param closed true if stdout or stderr was closed, false otherwise
+    * @return the method should return {@code true} if more data is desired
     */
    public boolean onOutput(ByteBuffer buffer, boolean closed)
    {

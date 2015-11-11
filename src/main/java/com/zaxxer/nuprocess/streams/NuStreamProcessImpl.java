@@ -19,7 +19,7 @@ package com.zaxxer.nuprocess.streams;
 import java.util.concurrent.TimeUnit;
 
 import com.zaxxer.nuprocess.NuProcess;
-import com.zaxxer.nuprocess.streams.NuStreamProcessBuilder.StreamProcessHandler;
+import com.zaxxer.nuprocess.streams.NuStreamProcessBuilder.BridgeProcessHandler;
 
 public class NuStreamProcessImpl implements NuStreamProcess
 {
@@ -32,7 +32,7 @@ public class NuStreamProcessImpl implements NuStreamProcess
    {
    }
 
-   void setStreamProcessHandler(final StreamProcessHandler processHandler)
+   void setStreamProcessHandler(final BridgeProcessHandler processHandler)
    {
       stdinPublisher = new NuStreamPublisher(processHandler, NuProcess.Stream.STDIN);
       stdoutPublisher = new NuStreamPublisher(processHandler, NuProcess.Stream.STDOUT);
@@ -75,7 +75,7 @@ public class NuStreamProcessImpl implements NuStreamProcess
       return nuProcess.isRunning();
    }
 
-   void setStreamProcessHandler(NuProcess nuProcess)
+   void setNuProcess(NuProcess nuProcess)
    {
       this.nuProcess = nuProcess;
    }
