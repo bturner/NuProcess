@@ -460,6 +460,13 @@ public abstract class BasePosixProcess implements NuProcess
          }
 
          int read = LibC.read(stdout.get(), outBuffer, Math.min(availability, outBuffer.remaining()));
+         if (read == 0) {
+            outClosed = true;
+            outBuffer.flip();
+            processHandler.onStdout(outBuffer, true);
+            return false;
+         }
+
          if (read == -1) {
             // EOF?
             outClosed = true;

@@ -86,7 +86,7 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
       // stdout and stderr.
       try {
          EpollEvent epEvent = eventPool.take();
-         epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLRDHUP | LibEpoll.EPOLLERR;
+         epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLERR;
          epEvent.data.fd = stdout;
          LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, stdout, epEvent);
          epEvent.data.fd = stderr;
@@ -119,11 +119,6 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          event.events = LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
          event.data.fd = fd;
          int rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, fd, event);
-         if (rc == -1) {
-            rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_DEL, fd, event);
-            rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, fd, event);
-         }
-
          if (rc == -1) {
             rc = Native.getLastError();
             throw new RuntimeException("Unable to register new events to epoll, errorcode: " + rc);
@@ -219,9 +214,9 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
                again = linuxProcess.readStderr(NuProcess.BUFFER_CAPACITY);
             }
 
-            epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLRDHUP | LibEpoll.EPOLLERR;
+            epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLERR;
             if (again) {
-               epEvent.events = LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
+               epEvent.events = epEvent.events | LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
             }
             LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, ident, epEvent);
          }
@@ -234,16 +229,16 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
                }
             }
          }
-
-         if ((events & LibEpoll.EPOLLHUP) != 0 || (events & LibEpoll.EPOLLRDHUP) != 0 || (events & LibEpoll.EPOLLERR) != 0) {
+         else if ((events & LibEpoll.EPOLLHUP) != 0 || (events & LibEpoll.EPOLLRDHUP) != 0 || (events & LibEpoll.EPOLLERR) != 0) {
             LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_DEL, ident, null);
-            if (ident == linuxProcess.getStdout().get()) {
-               linuxProcess.readStdout(-1);
-            }
-            else if (ident == linuxProcess.getStderr().get()) {
-               linuxProcess.readStderr(-1);
-            }
-            else if (ident == linuxProcess.getStdin().get()) {
+//            if (ident == linuxProcess.getStdout().get()) {
+//               linuxProcess.readStdout(-1);
+//            }
+//            else if (ident == linuxProcess.getStderr().get()) {
+//               linuxProcess.readStderr(-1);
+//            }
+//            else 
+               if (ident == linuxProcess.getStdin().get()) {
                linuxProcess.closeStdin(true);
             }
          }

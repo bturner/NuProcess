@@ -51,7 +51,7 @@ public class CatStreamTest
          public void onComplete()
          {
             timer.cancel();
-            System.err.printf("Final Adler32: %d\n", readAdler32.getValue());
+            System.err.printf("\nFinal Adler32: %d\n", readAdler32.getValue());
          }
          
          @Override
@@ -62,17 +62,22 @@ public class CatStreamTest
          @Override
          public void onNext(ByteBuffer buffer)
          {
+            int available = buffer.remaining();
             if (buffer.hasRemaining()) {
                buffer.get(bytes);
-               readAdler32.update(bytes);
-               System.err.printf("Adler32: %d\n", readAdler32.getValue());
+               readAdler32.update(bytes, 0, available);
+               // System.err.print(".");
+               System.out.print(new String(bytes, 0, available));
                
                timer.schedule(new TimerTask() {
                   public void run()
                   {
                      subscription.request(1);
                   }
-               }, TimeUnit.SECONDS.toMillis(1));            
+               }, TimeUnit.MILLISECONDS.toMillis(500));            
+            }
+            else {
+               System.err.println("\nUnexpected.");
             }
          }
          
@@ -101,5 +106,6 @@ public class CatStreamTest
       process.waitFor(0, TimeUnit.SECONDS); // wait until the process exists
 
       Assert.assertTrue("", new String(subscriber.bytes, "UTF-8").contains("end of file"));
+      Assert.assertEquals("Adler32 checksum not as expected",  1166182719L, subscriber.readAdler32.getValue());
    }
 }
