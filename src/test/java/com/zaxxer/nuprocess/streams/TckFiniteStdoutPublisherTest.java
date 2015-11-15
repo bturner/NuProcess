@@ -1,5 +1,6 @@
 package com.zaxxer.nuprocess.streams;
 
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 
 import org.reactivestreams.Publisher;
@@ -7,10 +8,14 @@ import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 import org.reactivestreams.tck.PublisherVerification;
 import org.reactivestreams.tck.TestEnvironment;
+import org.slf4j.LoggerFactory;
 import org.testng.SkipException;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
 
 import com.zaxxer.nuprocess.NuProcessBuilder;
 
+@Test(singleThreaded = true, threadPoolSize = 1)
 public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuffer>
 {
    private static final long DEFAULT_TIMEOUT = 300L;
@@ -26,9 +31,16 @@ public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuff
       }
    }
 
+   @BeforeMethod
+   protected void startSession(Method method) throws Exception
+   {
+      LoggerFactory.getLogger(this.getClass()).info("Starting test method: {}", method.getName());
+   }
+
    @Override
    public Publisher<ByteBuffer> createPublisher(long elements)
    {
+      LoggerFactory.getLogger(this.getClass()).info("Starting new test #################################################");
       NuProcessBuilder builder = new NuProcessBuilder(command, "src/test/resources/chunk.txt");
       NuStreamProcessBuilder streamBuilder = new NuStreamProcessBuilder(builder);
       NuStreamProcess process = streamBuilder.start();

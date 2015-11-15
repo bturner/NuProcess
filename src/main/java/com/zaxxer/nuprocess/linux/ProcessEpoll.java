@@ -23,6 +23,9 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.sun.jna.Native;
 import com.sun.jna.ptr.IntByReference;
 import com.zaxxer.nuprocess.NuProcess;
@@ -41,6 +44,8 @@ import static com.zaxxer.nuprocess.internal.LibC.WTERMSIG;
 class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
 {
    private static final int EVENT_POOL_SIZE = 32;
+
+   private final Logger LOGGER = LoggerFactory.getLogger(ProcessEpoll.class);
 
    private int epoll;
    private EpollEvent triggeredEvent;
@@ -74,13 +79,14 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          return;
       }
 
+      int stdin  = process.getStdin().get();
       int stdout = process.getStdout().get();
       int stderr = process.getStderr().get();
 
-      pidToProcessMap.put(process.getPid(), process);
-      fildesToProcessMap.put(stdout, process);
-      fildesToProcessMap.put(stderr, process);
-      fildesToProcessMap.put(process.getStdin().get(), process);
+      pidToProcessMap.put(process.getUid(), process);
+      fildesToProcessMap.put(process.getKey(stdout), process);
+      fildesToProcessMap.put(process.getKey(stderr), process);
+      fildesToProcessMap.put(process.getKey(stdin), process);
 
       // In order for soft-exit detection to work, we must allways be listening for HUP/ERR on
       // stdout and stderr.
@@ -89,8 +95,10 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLERR;
          epEvent.data.fd = stdout;
          LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, stdout, epEvent);
+         LOGGER.debug("action(EPOLL_CTL_ADD) EPOLLHUP | EPOLLERR on stdout({}) for {}", stdout, process);
          epEvent.data.fd = stderr;
          LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, stderr, epEvent);
+         LOGGER.debug("action(EPOLL_CTL_ADD) EPOLLHUP | EPOLLERR on stderr({}) for {}", stderr, process);
          eventPool.offer(epEvent);
       }
       catch (InterruptedException e) {
@@ -118,10 +126,21 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          event = eventPool.take();
          event.events = LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
          event.data.fd = fd;
-         int rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, fd, event);
-         if (rc == -1) {
-            rc = Native.getLastError();
-            throw new RuntimeException("Unable to register new events to epoll, errorcode: " + rc);
+         synchronized (process) {
+	         int rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, fd, event);
+	         if (rc == -1) {
+	            rc = Native.getLastError();
+	            if (rc == LibEpoll.ENOENT) {
+	               rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, fd, event);
+	               LOGGER.debug("queueRead(): action(EPOLL_CTL_ADD) EPOLLIN | EPOLLONESHOT on {} for {}", stream, process);
+	            }
+	            else {
+	               throw new RuntimeException("Unable to register new events to epoll, errorcode: " + rc);
+	            }
+	         }
+	         else {
+	            LOGGER.debug("queueRead(): action(EPOLL_CTL_MOD) EPOLLIN | EPOLLONESHOT on {} for {}", stream, process);
+	         }
          }
       }
       catch (InterruptedException ie) {
@@ -155,6 +174,10 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          if (rc == -1) {
             rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_DEL, stdin, event);
             rc = LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_ADD, stdin, event);
+            LOGGER.debug("queueWrite(): action(EPOLL_CTL_ADD) EPOLLOUT | EPOLLONESHOT | EPOLLRDHUP | EPOLLHUP on stdin({}) for {}", stdin, process);
+         }
+         else {
+            LOGGER.debug("queueWrite(): action(EPOLL_CTL_MOD) EPOLLOUT | EPOLLONESHOT | EPOLLRDHUP | EPOLLHUP on stdin({}) for {}", stdin, process);
          }
 
          if (rc == -1) {
@@ -204,43 +227,51 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
             return true;
          }
 
-         if ((events & LibEpoll.EPOLLIN) != 0) // stdout/stderr data available to read
-         {
-            boolean again = false;
-            if (ident == linuxProcess.getStdout().get()) {
-               again = linuxProcess.readStdout(NuProcess.BUFFER_CAPACITY);
-            }
-            else {
-               again = linuxProcess.readStderr(NuProcess.BUFFER_CAPACITY);
-            }
-
-            epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLERR;
-            if (again) {
-               epEvent.events = epEvent.events | LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
-            }
-            LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, ident, epEvent);
-         }
-         else if ((events & LibEpoll.EPOLLOUT) != 0) // Room in stdin pipe available to write
-         {
-            if (linuxProcess.getStdin().get() != -1) {
-               if (linuxProcess.writeStdin(NuProcess.BUFFER_CAPACITY)) {
-                  epEvent.events = LibEpoll.EPOLLOUT | LibEpoll.EPOLLONESHOT | LibEpoll.EPOLLRDHUP | LibEpoll.EPOLLHUP;
-                  LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, ident, epEvent);
-               }
-            }
-         }
-         else if ((events & LibEpoll.EPOLLHUP) != 0 || (events & LibEpoll.EPOLLRDHUP) != 0 || (events & LibEpoll.EPOLLERR) != 0) {
-            LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_DEL, ident, null);
-//            if (ident == linuxProcess.getStdout().get()) {
-//               linuxProcess.readStdout(-1);
-//            }
-//            else if (ident == linuxProcess.getStderr().get()) {
-//               linuxProcess.readStderr(-1);
-//            }
-//            else 
-               if (ident == linuxProcess.getStdin().get()) {
-               linuxProcess.closeStdin(true);
-            }
+         synchronized (linuxProcess) {
+	         if ((events & LibEpoll.EPOLLIN) != 0) // stdout/stderr data available to read
+	         {
+	            boolean again = false;
+	            if (ident == linuxProcess.getStdout().get()) {
+	               again = linuxProcess.readStdout(NuProcess.BUFFER_CAPACITY);
+	            }
+	            else {
+	               again = linuxProcess.readStderr(NuProcess.BUFFER_CAPACITY);
+	            }
+	
+	            epEvent.events = LibEpoll.EPOLLHUP | LibEpoll.EPOLLERR;
+	            if (again) {
+	               epEvent.events = epEvent.events | LibEpoll.EPOLLIN | LibEpoll.EPOLLONESHOT;
+	               LOGGER.debug("process(): action(EPOLL_CTL_MOD) EPOLLIN | EPOLLONESHOT | EPOLLHUP | EPOLLERR on stdout/err({}) for {}", ident, linuxProcess);
+	            }
+	            else {
+	                 LOGGER.debug("process(): action(EPOLL_CTL_MOD) EPOLLHUP | EPOLLERR on stdout/err({}) for {}", ident, linuxProcess);
+	            }
+	            LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, ident, epEvent);
+	         }
+	         else if ((events & LibEpoll.EPOLLOUT) != 0) // Room in stdin pipe available to write
+	         {
+	            if (linuxProcess.getStdin().get() != -1) {
+	               if (linuxProcess.writeStdin(NuProcess.BUFFER_CAPACITY)) {
+	                  epEvent.events = LibEpoll.EPOLLOUT | LibEpoll.EPOLLONESHOT | LibEpoll.EPOLLRDHUP | LibEpoll.EPOLLHUP;
+	                  LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_MOD, ident, epEvent);
+	               }
+	            }
+	         }
+	         else if ((events & LibEpoll.EPOLLHUP) != 0 || (events & LibEpoll.EPOLLRDHUP) != 0 || (events & LibEpoll.EPOLLERR) != 0) {
+	            LibEpoll.epoll_ctl(epoll, LibEpoll.EPOLL_CTL_DEL, ident, null);
+	            if (ident == linuxProcess.getStdout().get()) {
+                  LOGGER.debug("process(): Received EPOLLHUP on stdout({}) for {}", ident, linuxProcess);
+	               linuxProcess.readStdout(-1);
+	            }
+	            else if (ident == linuxProcess.getStderr().get()) {
+                  LOGGER.debug("process(): Received EPOLLHUP on stderr({}) for {}", ident, linuxProcess);
+	               linuxProcess.readStderr(-1);
+	            }
+	            else if (ident == linuxProcess.getStdin().get()) {
+                  LOGGER.debug("process(): Received EPOLLHUP on stdin({}) for {}", ident, linuxProcess);
+	               linuxProcess.closeStdin(true);
+	            }
+	         }
          }
 
          if (linuxProcess.isSoftExit()) {
