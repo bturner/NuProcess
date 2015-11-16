@@ -15,7 +15,7 @@ import org.testng.annotations.Test;
 
 import com.zaxxer.nuprocess.NuProcessBuilder;
 
-@Test(singleThreaded = true, threadPoolSize = 1)
+@Test(singleThreaded = true, threadPoolSize = 1, groups = "tck")
 public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuffer>
 {
    private static final long DEFAULT_TIMEOUT = 300L;

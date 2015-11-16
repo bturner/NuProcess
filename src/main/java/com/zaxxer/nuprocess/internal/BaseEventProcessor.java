@@ -35,8 +35,8 @@ public abstract class BaseEventProcessor<T extends BasePosixProcess> implements 
    protected static final int LINGER_ITERATIONS;
    private final int lingerIterations;
 
-   protected Map<Integer, T> pidToProcessMap;
-   protected Map<Long, T> fildesToProcessMap;
+   protected Map<Long, T> pidToProcessMap;
+//   protected Map<Long, T> fildesToProcessMap;
 
    protected volatile boolean shutdown;
 
@@ -59,8 +59,8 @@ public abstract class BaseEventProcessor<T extends BasePosixProcess> implements 
    public BaseEventProcessor(int lingerIterations)
    {
       this.lingerIterations = lingerIterations;
-      pidToProcessMap = new ConcurrentHashMap<Integer, T>();
-      fildesToProcessMap = new ConcurrentHashMap<Long, T>();
+      pidToProcessMap = new ConcurrentHashMap<Long, T>();
+//      fildesToProcessMap = new ConcurrentHashMap<Long, T>();
       isRunning = new AtomicBoolean();
    }
 

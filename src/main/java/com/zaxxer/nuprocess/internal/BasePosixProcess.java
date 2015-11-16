@@ -144,7 +144,7 @@ public abstract class BasePosixProcess implements NuProcess
       Properties systemProperties = System.getProperties();
       uid = (AtomicInteger) systemProperties.get("com.zaxxer.nuprocess.uidAtomicInteger");
       if (uid == null) {
-         uid = new AtomicInteger();
+         uid = new AtomicInteger(9999);
          systemProperties.put("com.zaxxer.nuprocess.uidAtomicInteger", uid);
       }
    }
@@ -220,15 +220,15 @@ public abstract class BasePosixProcess implements NuProcess
          return null;
       }
       finally {
-         LibC.posix_spawnattr_destroy(posix_spawnattr);
-         LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
+         // LibC.posix_spawnattr_destroy(posix_spawnattr);
+         // LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
 
          // After we've spawned, close the unused ends of our pipes (that were dup'd into the child process space)
-         LibC.close(stdinWidow);
-         LibC.close(stdoutWidow);
-         LibC.close(stderrWidow);
+         // LibC.close(stdinWidow);
+         // LibC.close(stdoutWidow);
+         // LibC.close(stderrWidow);
 
-         deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
+         // deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
       }
 
       return this;
@@ -292,10 +292,17 @@ public abstract class BasePosixProcess implements NuProcess
       if (timeout == 0) {
          exitPending.await();
       }
-      else if (!exitPending.await(timeout, unit)) {
-         return Integer.MIN_VALUE;
+      else {
+         long start = System.currentTimeMillis();
+         while (!exitPending.await(250, TimeUnit.MILLISECONDS)) {
+            if ((System.currentTimeMillis() - start) > unit.toMillis(timeout)) {
+               return Integer.MIN_VALUE;
+            }
+            LOGGER.debug("Waiting on {} for process {} to exit... {}ms elapsed", exitPending, this, (System.currentTimeMillis() - start));
+         }
       }
 
+      LOGGER.debug("Thread {} exited waitFor() on processess {}", Thread.currentThread(), this);
       return exitCode.get();
    }
 
@@ -419,14 +426,19 @@ public abstract class BasePosixProcess implements NuProcess
       return (IS_SOFTEXIT_DETECTION && outClosed && errClosed);
    }
 
-   public int getUid()
+   public long getUid()
    {
       return uid.get();
    }
 
    public long getKey(int fd)
    {
-      return uid.get() << 32 | fd;
+      return ((long) uid.get()) << 32 | fd;
+   }
+
+   public int getFdFromKey(long key)
+   {
+      return (int) (key & 0xffffffff);
    }
 
    public void onExit(int statusCode)
@@ -437,7 +449,7 @@ public abstract class BasePosixProcess implements NuProcess
       }
 
       try {
-         closeStdin(true);
+         // closeStdin(true);
          close(stdout);
          close(stderr);
 
@@ -480,17 +492,16 @@ public abstract class BasePosixProcess implements NuProcess
       }
 
       try {
-//         if (availability < 0) {
-//            outClosed = true;
-//            // outBuffer.flip();
-//            processHandler.onStdout(outBuffer, true);
-//            return false;
-//         }
-//
+         if (availability < 0) {
+            outClosed = true;
+            outBuffer.limit(outBuffer.position());
+            processHandler.onStdout(outBuffer, true);
+            return false;
+         }
+
          int read = LibC.read(stdout.get(), outBuffer, Math.min(availability, outBuffer.remaining()));
          if (read == 0) {
             LOGGER.debug("Read 0 bytes, calling onStdout() with closed=true");
-            close(stdout);
             outClosed = true;
             outBuffer.limit(outBuffer.position());
             processHandler.onStdout(outBuffer, true);
@@ -501,7 +512,7 @@ public abstract class BasePosixProcess implements NuProcess
             // EOF?
             close(stdout);
             outClosed = true;
-            throw new RuntimeException("Unexpected eof");
+            return false;
          }
 
          outBuffer.limit(outBuffer.position() + read);
@@ -526,16 +537,26 @@ public abstract class BasePosixProcess implements NuProcess
       try {
          if (availability < 0) {
             errClosed = true;
-            errBuffer.flip();
+            errBuffer.limit(errBuffer.position());
             processHandler.onStderr(errBuffer, true);
             return false;
          }
 
          int read = LibC.read(stderr.get(), errBuffer, Math.min(availability, errBuffer.remaining()));
+         if (read == 0) {
+            LOGGER.debug("Read 0 bytes, calling onStderr() with closed=true");
+            errClosed = true;
+            errBuffer.limit(errBuffer.position());
+            processHandler.onStderr(errBuffer, true);
+            return false;
+         }
+
          if (read == -1) {
             // EOF?
+            int errno = Native.getLastError();
+            close(stderr);
             errClosed = true;
-            throw new RuntimeException("Unexpected eof");
+            return false;
          }
 
          errBuffer.limit(errBuffer.position() + read);
