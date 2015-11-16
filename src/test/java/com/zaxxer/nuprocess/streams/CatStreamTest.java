@@ -66,7 +66,7 @@ public class CatStreamTest
             if (buffer.hasRemaining()) {
                buffer.get(bytes, 0, available);
                readAdler32.update(bytes, 0, available);
-               System.out.print(new String(bytes, 0, available));
+               // System.out.print(new String(bytes, 0, available));
                
                timer.schedule(new TimerTask() {
                   public void run()

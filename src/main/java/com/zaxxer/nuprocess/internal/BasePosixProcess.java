@@ -49,13 +49,14 @@ public abstract class BasePosixProcess implements NuProcess
    protected static final IEventProcessor<? extends BasePosixProcess>[] processors;
    protected static int processorRoundRobin;
 
-   protected static AtomicInteger uid = new AtomicInteger();
+   protected static AtomicInteger uidSequence = new AtomicInteger();
 
    protected Logger LOGGER = LoggerFactory.getLogger(this.getClass());
 
    protected IEventProcessor<? super BasePosixProcess> myProcessor;
    protected volatile NuProcessHandler processHandler;
 
+   protected volatile int uid;
    protected volatile int pid;
    protected volatile boolean isRunning;
    public final AtomicBoolean cleanlyExitedBeforeProcess;
@@ -142,10 +143,10 @@ public abstract class BasePosixProcess implements NuProcess
       }
 
       Properties systemProperties = System.getProperties();
-      uid = (AtomicInteger) systemProperties.get("com.zaxxer.nuprocess.uidAtomicInteger");
-      if (uid == null) {
-         uid = new AtomicInteger(9999);
-         systemProperties.put("com.zaxxer.nuprocess.uidAtomicInteger", uid);
+      uidSequence = (AtomicInteger) systemProperties.get("com.zaxxer.nuprocess.uidAtomicInteger");
+      if (uidSequence == null) {
+         uidSequence = new AtomicInteger(0);
+         systemProperties.put("com.zaxxer.nuprocess.uidAtomicInteger", uidSequence);
       }
    }
 
@@ -170,7 +171,7 @@ public abstract class BasePosixProcess implements NuProcess
 
    public NuProcess start(List<String> command, String[] environment, Path cwd)
    {
-      uid.incrementAndGet();
+      uid = uidSequence.incrementAndGet();
 
       callPreStart();
 
@@ -220,15 +221,18 @@ public abstract class BasePosixProcess implements NuProcess
          return null;
       }
       finally {
-         // LibC.posix_spawnattr_destroy(posix_spawnattr);
-         // LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
+          LibC.posix_spawnattr_destroy(posix_spawnattr);
+          LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
 
          // After we've spawned, close the unused ends of our pipes (that were dup'd into the child process space)
-         // LibC.close(stdinWidow);
-         // LibC.close(stdoutWidow);
-         // LibC.close(stderrWidow);
+          LOGGER.debug("Close stdinWidow({}) for {}", stdinWidow, this);
+          LibC.close(stdinWidow);
+          LOGGER.debug("Close stdoutWidow({}) for {}", stdoutWidow, this);
+          LibC.close(stdoutWidow);
+          LOGGER.debug("Close stderrWidow({}) for {}", stderrWidow, this);
+          LibC.close(stderrWidow);
 
-         // deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
+          deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
       }
 
       return this;
@@ -294,7 +298,7 @@ public abstract class BasePosixProcess implements NuProcess
       }
       else {
          long start = System.currentTimeMillis();
-         while (!exitPending.await(250, TimeUnit.MILLISECONDS)) {
+         while (!exitPending.await(250000, TimeUnit.MILLISECONDS)) {
             if ((System.currentTimeMillis() - start) > unit.toMillis(timeout)) {
                return Integer.MIN_VALUE;
             }
@@ -428,12 +432,12 @@ public abstract class BasePosixProcess implements NuProcess
 
    public long getUid()
    {
-      return uid.get();
+      return uid;
    }
 
    public long getKey(int fd)
    {
-      return ((long) uid.get()) << 32 | fd;
+      return (long) uid << 32 | ((long) fd & 0xffffffffL);
    }
 
    public int getFdFromKey(long key)

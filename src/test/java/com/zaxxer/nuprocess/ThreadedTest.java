@@ -28,8 +28,8 @@ public class ThreadedTest
       System.err.println("Starting threadTest1()");
 
       ArrayList<Thread> threads = new ArrayList<Thread>();
-      int threadCount = 2;
-      int procCount = 1;
+      int threadCount = 4;
+      int procCount = 25;
 
       for (int ii = 0; ii < threadCount; ii++) {
          MyThread mt = new MyThread(ii, procCount);
@@ -39,7 +39,7 @@ public class ThreadedTest
       }
 
       for (Thread th : threads) {
-         th.join(TimeUnit.SECONDS.toMillis(2000));
+         th.join(TimeUnit.SECONDS.toMillis(30));
       }
 
       System.err.println("Completed threadTest1()");
@@ -71,16 +71,16 @@ public class ThreadedTest
             for (int i = 0; i < PROCESSES; i++) {
                handlers[i] = new LottaProcessHandler();
                pb.setProcessListener(handlers[i]);
-               System.err.printf("  thread %d starting process %d...\n", id, i + 1);
+               // System.err.printf("  thread %d starting process %d...\n", id, i + 1);
                processes[i] = pb.start();
                processes[i].want(Stream.STDOUT);
-               System.err.printf("  thread %d started process %d: %s\n", id, i + 1, processes[i].toString());
-               Thread.sleep(1000L);
+               processes[i].want(Stream.STDERR);
+               // System.err.printf("  thread %d started process %d: %s\n", id, i + 1, processes[i].toString());
             }
 
             // Kick all of the processes to start going
             for (NuProcess process : processes) {
-               System.err.printf("  Thread %d calling wantWrite() on process: %s\n", id, process.toString());
+               // System.err.printf("  Thread %d calling wantWrite() on process: %s\n", id, process.toString());
                process.want(Stream.STDIN);
             }
 
@@ -89,10 +89,13 @@ public class ThreadedTest
                Iterator<NuProcess> iterator = procList.iterator();
                while (iterator.hasNext()) {
                   NuProcess process = iterator.next();
-                  if (process.waitFor(250, TimeUnit.MILLISECONDS) != Integer.MIN_VALUE) {
+                  int rc = process.waitFor(250, TimeUnit.MILLISECONDS);
+                  if (rc != Integer.MIN_VALUE) {
+                     // System.err.println(process + " exited with rc=" + rc);
+                     
                      iterator.remove();
                   }
-                  System.err.println("Still waiting for " + process);
+                  // System.err.println("Still waiting for " + process);
                }
             }
 
@@ -162,9 +165,10 @@ public class ThreadedTest
 
 //         if (size == LIMIT) {
 //            nuProcess.closeStdin(true);
+//            size = Integer.MAX_VALUE;
 //         }
 
-         System.err.println(nuProcess + " adler32: " + readAdler32.getValue());
+         // System.err.println(nuProcess + " adler32: " + readAdler32.getValue());
          return !closed && (size < LIMIT);
       }
 
@@ -174,9 +178,9 @@ public class ThreadedTest
          buffer.put(bytes);
          buffer.flip();
 
-         boolean close = (++writes < WRITES);
+         boolean close = (++writes >= WRITES);
          if (close) {
-            nuProcess.closeStdin(true);
+            nuProcess.closeStdin(false);
          }
 
          return !close;
