@@ -64,8 +64,8 @@ public class NuStreamPublisher implements Publisher<ByteBuffer>
       @Override
       public void request(long n)
       {
-         if (n < 1) {
-            throw new IllegalArgumentException("Subscription.request() value cannot be less than 1");
+         if (n < 0) {
+            throw new IllegalArgumentException("Subscription.request() value cannot be less than 0");
          }
 
          if (stream != null) {
