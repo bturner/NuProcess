@@ -83,11 +83,8 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
       int stdout = process.getStdout().get();
       int stderr = process.getStderr().get();
 
-      LOGGER.debug("pidToProcessMap.put({}, {}) for  stdin({})", process.getKey(stdin), process, stdin);
       pidToProcessMap.put(process.getKey(stdin), process);
-      LOGGER.debug("pidToProcessMap.put({}, {}) for stdout({})", process.getKey(stdout), process, stdout);
       pidToProcessMap.put(process.getKey(stdout), process);
-      LOGGER.debug("pidToProcessMap.put({}, {}) for stderr({})", process.getKey(stderr), process, stderr);
       pidToProcessMap.put(process.getKey(stderr), process);
 
       // In order for soft-exit detection to work, we must allways be listening for HUP/ERR on

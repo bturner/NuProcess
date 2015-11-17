@@ -21,13 +21,19 @@ import java.nio.ByteBuffer;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.zaxxer.nuprocess.NuProcess.Stream;
 import com.zaxxer.nuprocess.streams.NuStreamProcessBuilder.BridgeProcessHandler;
 
 public class NuStreamPublisher implements Publisher<ByteBuffer>
 {
-   private final BridgeProcessHandler processHandler;
+   private static final Logger LOGGER = LoggerFactory.getLogger(NuStreamPublisher.class);
+
+   final BridgeProcessHandler processHandler;
+
+   private Subscriber<? super ByteBuffer> subscriber;
    private Stream stream;
 
    NuStreamPublisher(final BridgeProcessHandler processHandler, final Stream stream)
@@ -43,6 +49,7 @@ public class NuStreamPublisher implements Publisher<ByteBuffer>
          throw new NullPointerException("Subscriber cannot be null");
       }
 
+      this.subscriber = subscriber;
       processHandler.setSubscriber(stream, subscriber);
 
       NuStreamSubscription subscription = new NuStreamSubscription();
@@ -54,21 +61,25 @@ public class NuStreamPublisher implements Publisher<ByteBuffer>
       @Override
       public void cancel()
       {
+         LOGGER.debug("NuStreamSubscription.cancel() called on subscription {}", this);
          if (stream != null) {
             final Stream s = stream;
             stream = null;
             processHandler.cancel(s);
+            NuStreamPublisher.this.subscriber = null;
          }
       }
 
       @Override
       public void request(long n)
       {
-         if (n < 0) {
-            throw new IllegalArgumentException("Subscription.request() value cannot be less than 0");
+         if (n <= 0) {
+            IllegalArgumentException e = new IllegalArgumentException("Subscription.request() value cannot be less than 1, rule 3.9");
+            subscriber.onError(e);
          }
 
          if (stream != null) {
+            LOGGER.debug("NuStreamSubscription.request({}) called on subscription {}", n, this);
             processHandler.request(stream, n);
          }
       }

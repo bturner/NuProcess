@@ -34,13 +34,11 @@ public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuff
    @BeforeMethod
    protected void startSession(Method method) throws Exception
    {
-      LoggerFactory.getLogger(this.getClass()).info("Starting test method: {}", method.getName());
+      LoggerFactory.getLogger(this.getClass()).info("Test: {}", method.getName());
    }
 
-   @Override
-   public Publisher<ByteBuffer> createPublisher(long elements)
+   @Override public Publisher<ByteBuffer> createPublisher(long elements)
    {
-      LoggerFactory.getLogger(this.getClass()).info("Starting new test #################################################");
       NuProcessBuilder builder = new NuProcessBuilder(command, "src/test/resources/chunk.txt");
       NuStreamProcessBuilder streamBuilder = new NuStreamProcessBuilder(builder);
       NuStreamProcess process = streamBuilder.start();
@@ -50,17 +48,20 @@ public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuff
       return new TckFiniteStdoutPublisher(nuStreamPublisher, elements);
    }
 
-   @Override
-   public Publisher<ByteBuffer> createFailedPublisher()
+   @Override public Publisher<ByteBuffer> createFailedPublisher()
    {
-      throw new SkipException("Not implemented");
+      return null;
+   }
+
+   @Override public long maxElementsFromPublisher()
+   {
+      return publisherUnableToSignalOnComplete(); // == Long.MAX_VALUE == unbounded
    }
 
    private static class TckFiniteStdoutPublisher implements Publisher<ByteBuffer>
    {
       private final NuStreamPublisher publisher;
       private final long elements;
-      private ProxySubscriber proxySubscriber;
 
       TckFiniteStdoutPublisher(final NuStreamPublisher nuStreamPublisher, final long elements)
       {
@@ -71,8 +72,7 @@ public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuff
       @Override
       public void subscribe(Subscriber<? super ByteBuffer> sub)
       {
-         this.proxySubscriber = new ProxySubscriber(sub);
-         publisher.subscribe(proxySubscriber);
+         publisher.subscribe(new ProxySubscriber(sub));
       }
 
       class ProxySubscriber implements Subscriber<ByteBuffer>
@@ -100,14 +100,37 @@ public class TckFiniteStdoutPublisherTest extends PublisherVerification<ByteBuff
          public void onNext(ByteBuffer buffer)
          {
             subscriber.onNext(buffer);
+
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
          }
          
          @Override
          public void onSubscribe(Subscription subscription)
          {
             subscriber.onSubscribe(subscription);
-            subscription.request(elements);
+            // subscription.request(elements);
          }
       }
+   }
+
+   @Override public void optional_spec111_maySupportMultiSubscribe() throws Throwable
+   {
+      throw new SkipException("Not implemented");
+   }
+
+   @Override public void optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfront() throws Throwable
+   {
+      throw new SkipException("Not implemented");
+   }
+
+   @Override public void optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfrontAndCompleteAsExpected() throws Throwable
+   {
+      throw new SkipException("Not implemented");
+   }
+
+   @Override public void optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingOneByOne() throws Throwable
+   {
+      throw new SkipException("Not implemented");
    }
 }

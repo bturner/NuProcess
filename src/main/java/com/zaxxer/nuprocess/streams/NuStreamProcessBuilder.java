@@ -68,9 +68,13 @@ public class NuStreamProcessBuilder
       private final NuStreamProcessHandler streamProcessHandler;
       
       private NuProcess nuProcess;
-      private Subscriber<? super ByteBuffer> stdinSubscriber;
-      private Subscriber<? super ByteBuffer> stdoutSubscriber;
-      private Subscriber<? super ByteBuffer> stderrSubscriber;
+      private volatile Subscriber<? super ByteBuffer> stdinSubscriber;
+      private volatile Subscriber<? super ByteBuffer> stdoutSubscriber;
+      private volatile Subscriber<? super ByteBuffer> stderrSubscriber;
+
+      private boolean stdinComplete;
+      private boolean stdoutComplete;
+      private boolean stderrComplete;
 
       public BridgeProcessHandler(final NuStreamProcess streamProcess, final NuStreamProcessHandler streamProcessHandler)
       {
@@ -104,17 +108,26 @@ public class NuStreamProcessBuilder
          LOGGER.debug("{}.onExit() was called", this.getClass().getSimpleName());
          // TODO do we ever need to call stdinSubscriber.onError() ?
          if (stdinSubscriber != null) {
-            stdinSubscriber.onComplete();
+            if (!stdinComplete) {
+               stdinComplete = true;
+               stdinSubscriber.onComplete();
+            }
             stdinRequests.set(-1);
          }
 
          if (stdoutSubscriber != null) {
-            stdoutSubscriber.onComplete();
+            if (!stdoutComplete) {
+               stdoutComplete = true;
+               stdoutSubscriber.onComplete();
+            }
             stdoutRequests.set(-1);
          }
 
          if (stderrSubscriber != null) {
-            stderrSubscriber.onComplete();
+            if (!stdoutComplete) {
+               stdoutComplete = true;
+               stderrSubscriber.onComplete();
+            }
             stderrRequests.set(-1);
          }
       }
@@ -122,6 +135,10 @@ public class NuStreamProcessBuilder
       @Override
       public boolean onStdinReady(final ByteBuffer buffer)
       {
+         if (stdinRequests.get() < 0) {
+            return false;
+         }
+
          if (stdinSubscriber != null) {
             stdinSubscriber.onNext(buffer);
          }
@@ -133,27 +150,30 @@ public class NuStreamProcessBuilder
       @Override
       public boolean onStdout(final ByteBuffer buffer, final boolean closed)
       {
-         if (buffer.hasRemaining() && stdoutSubscriber != null) {
-            LOGGER.debug("{} calling {}.onNext()", this.getClass().getSimpleName(), stdoutSubscriber.getClass().getSimpleName());
-            stdoutSubscriber.onNext(buffer);
+         if (stdoutRequests.get() <= 0) {
+            return false;
+         }
+
+         final Subscriber<? super ByteBuffer> subscriber = stdoutSubscriber;
+         if (buffer.hasRemaining() && subscriber != null) {
+            LOGGER.debug("{} calling {}.onNext()", this.getClass().getSimpleName(), subscriber.getClass().getSimpleName());
+            subscriber.onNext(buffer);
          }
 
          if (closed) {
-            if (stdoutSubscriber != null) {
-               LOGGER.debug("{} calling {}.onComplete()", this.getClass().getSimpleName(), stdoutSubscriber.getClass().getSimpleName());
-               stdoutSubscriber.onComplete();
+            if (subscriber != null) {
+               LOGGER.debug("{} calling {}.onComplete()", this.getClass().getSimpleName(), subscriber.getClass().getSimpleName());               
                stdoutSubscriber = null;
+               if (!stdoutComplete) {
+                  stdoutComplete = true;
+                  subscriber.onComplete();
+               }
             }
 
             stdoutRequests.set(-1);
          }
 
-         if (stdoutRequests.decrementAndGet() == 0) {
-            LOGGER.debug("{} calling NuProcess.closeStdin(true)", this.getClass().getSimpleName());
-            nuProcess.closeStdin(true);
-         }
-
-         boolean more = !closed && stdoutRequests.get() > 0;
+         boolean more = !closed && stdoutRequests.decrementAndGet() > 0;
          LOGGER.debug("{} requesting more data: {}", this.getClass().getSimpleName(), more);
          
          return more;
@@ -162,24 +182,33 @@ public class NuStreamProcessBuilder
       @Override
       public boolean onStderr(final ByteBuffer buffer, final boolean closed)
       {
-         if (buffer.hasRemaining() && stderrSubscriber != null) {
-            stderrSubscriber.onNext(buffer);
+         if (stderrRequests.get() <= 0) {
+            return false;
+         }
+
+         final Subscriber<? super ByteBuffer> subscriber = stderrSubscriber;
+         if (buffer.hasRemaining() && subscriber != null) {
+            LOGGER.debug("{} calling {}.onNext()", this.getClass().getSimpleName(), subscriber.getClass().getSimpleName());
+            subscriber.onNext(buffer);
          }
 
          if (closed) {
-            if (stderrSubscriber != null) {
-               stderrSubscriber.onComplete();
+            if (subscriber != null) {
+               LOGGER.debug("{} calling {}.onComplete()", this.getClass().getSimpleName(), subscriber.getClass().getSimpleName());               
                stderrSubscriber = null;
+               if (!stderrComplete) {
+                  stderrComplete = true;
+                  subscriber.onComplete();
+               }
             }
 
             stderrRequests.set(-1);
          }
 
-         if (stderrRequests.decrementAndGet() == 0) {
-            nuProcess.destroy(true);
-         }
+         boolean more = !closed && stderrRequests.decrementAndGet() > 0;
+         LOGGER.debug("{} requesting more data: {}", this.getClass().getSimpleName(), more);
 
-         return !closed && stderrRequests.get() > 0;
+         return more;
       }
 
       void setSubscriber(final Stream stream, final Subscriber<? super ByteBuffer> subscriber)
@@ -205,17 +234,25 @@ public class NuStreamProcessBuilder
       {
          switch (stream) {
          case STDOUT:
-            if (stdoutSubscriber != null && stdoutRequests.get() >= 0 && Long.MAX_VALUE - stdoutRequests.get() > n && stdoutRequests.getAndAdd(n) == 0) {
-               nuProcess.want(stream);
+            if (stdoutSubscriber != null && stdoutRequests.get() >= 0 && Long.MAX_VALUE - stdoutRequests.get() >= n) {
+               if (stdoutRequests.getAndAdd(n) == 0) {
+                  nuProcess.want(stream);
+               }
+               else {
+                  LOGGER.debug("NuProcess.want({}) elided for request({}) because there were already pending requests", stream, n);
+               }
+            }
+            else {
+               LOGGER.debug("request({}) ignored (subscriber={}, requests={})", n, stdoutSubscriber, stdoutRequests);
             }
             break;
          case STDIN:
-            if (stdinSubscriber != null && stdinRequests.get() >= 0 && Long.MAX_VALUE - stdinRequests.get() > n && stdinRequests.getAndAdd(n) == 0) {
+            if (stdinSubscriber != null && stdinRequests.get() >= 0 && Long.MAX_VALUE - stdinRequests.get() >= n && stdinRequests.getAndAdd(n) == 0) {
                nuProcess.want(stream);
             }
             break;
          case STDERR:
-            if (stderrSubscriber != null && stderrRequests.get() >= 0 && Long.MAX_VALUE - stderrRequests.get() > n && stderrRequests.getAndAdd(n) == 0) {
+            if (stderrSubscriber != null && stderrRequests.get() >= 0 && Long.MAX_VALUE - stderrRequests.get() >= n && stderrRequests.getAndAdd(n) == 0) {
                nuProcess.want(stream);
             }
             break;
@@ -227,14 +264,22 @@ public class NuStreamProcessBuilder
          switch (stream) {
          case STDOUT:
             stdoutRequests.set(-1);
+            stdoutSubscriber = null;
             break;
          case STDIN:
             stdinRequests.set(-1);
+            stdinSubscriber = null;
             break;
          case STDERR:
             stderrRequests.set(-1);
+            stderrSubscriber = null;
             break;
          }         
+      }
+
+      NuProcess getNuProcess()
+      {
+         return nuProcess;
       }
    }
 }
