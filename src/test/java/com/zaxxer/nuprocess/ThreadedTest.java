@@ -16,6 +16,8 @@ import com.zaxxer.nuprocess.NuProcess.Stream;
 
 public class ThreadedTest
 {
+   private ArrayList<AssertionError> errors = new ArrayList<>();
+
    @Before
    public void unixOnly()
    {
@@ -42,10 +44,18 @@ public class ThreadedTest
          th.join(TimeUnit.SECONDS.toMillis(30));
       }
 
+      for (AssertionError error : errors) {
+         System.err.println(error);
+      }
+
+      if (!errors.isEmpty()) {
+         throw errors.iterator().next();
+      }
+
       System.err.println("Completed threadTest1()");
    }
 
-   static class MyThread extends Thread
+   class MyThread extends Thread
    {
       private int procCount;
       private int id;
@@ -100,7 +110,12 @@ public class ThreadedTest
             }
 
             for (LottaProcessHandler handler : handlers) {
-               Assert.assertEquals("Adler32 mismatch", 4237270634L, handler.getAdler() );
+               try {
+                  Assert.assertEquals("Adler32 mismatch", 4237270634L, handler.getAdler() );
+               }
+               catch (AssertionError e) {
+                  errors.add(e);
+               }
             }
          }
 
@@ -128,7 +143,6 @@ public class ThreadedTest
       private NuProcess nuProcess;
       private int writes;
       private int size;
-      private int exitCode;
 
       private Adler32 readAdler32 = new Adler32();
 
@@ -146,12 +160,6 @@ public class ThreadedTest
       public void onStart(final NuProcess nuProcess)
       {
          this.nuProcess = nuProcess;
-      }
-
-      @Override
-      public void onExit(int statusCode)
-      {
-         exitCode = statusCode;
       }
 
       @Override
@@ -184,11 +192,6 @@ public class ThreadedTest
          }
 
          return !close;
-      }
-
-      int getExitCode()
-      {
-         return exitCode;
       }
 
       long getAdler()

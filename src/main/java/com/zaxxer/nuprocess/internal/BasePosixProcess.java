@@ -221,18 +221,15 @@ public abstract class BasePosixProcess implements NuProcess
          return null;
       }
       finally {
-          LibC.posix_spawnattr_destroy(posix_spawnattr);
-          LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
+         LibC.posix_spawnattr_destroy(posix_spawnattr);
+         LibC.posix_spawn_file_actions_destroy(posix_spawn_file_actions);
 
          // After we've spawned, close the unused ends of our pipes (that were dup'd into the child process space)
-          LOGGER.debug("Close stdinWidow({}) for {}", stdinWidow, this);
-          LibC.close(stdinWidow);
-          LOGGER.debug("Close stdoutWidow({}) for {}", stdoutWidow, this);
-          LibC.close(stdoutWidow);
-          LOGGER.debug("Close stderrWidow({}) for {}", stderrWidow, this);
-          LibC.close(stderrWidow);
+         LibC.close(stdinWidow);
+         LibC.close(stdoutWidow);
+         LibC.close(stderrWidow);
 
-          deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
+         deallocateStructures(posix_spawn_file_actions, posix_spawnattr);
       }
 
       return this;
@@ -296,17 +293,10 @@ public abstract class BasePosixProcess implements NuProcess
       if (timeout == 0) {
          exitPending.await();
       }
-      else {
-         long start = System.currentTimeMillis();
-         while (!exitPending.await(250000, TimeUnit.MILLISECONDS)) {
-            if ((System.currentTimeMillis() - start) > unit.toMillis(timeout)) {
-               return Integer.MIN_VALUE;
-            }
-            LOGGER.debug("Waiting on {} for process {} to exit... {}ms elapsed", exitPending, this, (System.currentTimeMillis() - start));
-         }
+      else if (!exitPending.await(timeout, unit)) {
+         return Integer.MIN_VALUE;
       }
 
-      LOGGER.debug("Thread {} exited waitFor() on processess {}", Thread.currentThread(), this);
       return exitCode.get();
    }
 
@@ -504,7 +494,7 @@ public abstract class BasePosixProcess implements NuProcess
          }
 
          int read = LibC.read(stdout.get(), outBuffer, Math.min(availability, outBuffer.remaining()));
-         if (read == 0) {
+         if (read == 0) {  // EOF
             LOGGER.debug("Read 0 bytes, calling onStdout() with closed=true");
             outClosed = true;
             outBuffer.limit(outBuffer.position());
@@ -512,8 +502,8 @@ public abstract class BasePosixProcess implements NuProcess
             return false;
          }
 
-         if (read == -1) {
-            // EOF?
+         if (read == -1) {  // Unknown error
+            LOGGER.debug("Unexpected error during read ({})", Native.getLastError());
             close(stdout);
             outClosed = true;
             return false;
@@ -547,7 +537,7 @@ public abstract class BasePosixProcess implements NuProcess
          }
 
          int read = LibC.read(stderr.get(), errBuffer, Math.min(availability, errBuffer.remaining()));
-         if (read == 0) {
+         if (read == 0) {  // EOF
             LOGGER.debug("Read 0 bytes, calling onStderr() with closed=true");
             errClosed = true;
             errBuffer.limit(errBuffer.position());
@@ -555,9 +545,8 @@ public abstract class BasePosixProcess implements NuProcess
             return false;
          }
 
-         if (read == -1) {
-            // EOF?
-            int errno = Native.getLastError();
+         if (read == -1) {  // Unknown error
+            LOGGER.debug("Unexpected error during read ({})", Native.getLastError());
             close(stderr);
             errClosed = true;
             return false;

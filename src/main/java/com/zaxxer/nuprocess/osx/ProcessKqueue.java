@@ -27,6 +27,9 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.IntByReference;
 import com.zaxxer.nuprocess.NuProcess;
@@ -41,6 +44,8 @@ import com.zaxxer.nuprocess.osx.LibKevent.TimeSpec;
  */
 final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
 {
+   private static final Logger LOGGER = LoggerFactory.getLogger(ProcessKqueue.class);
+
    private static final int NUM_KEVENTS = 64;
    private static final int JAVA_PID;
 
@@ -212,7 +217,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
    {
       int ident = kevent.ident.intValue();
       int filter = (int) kevent.filter;
-      int udata = (int) (0xFFFFFFFF & Pointer.nativeValue(kevent.udata));
+      long udata = Pointer.nativeValue(kevent.udata);
 
       if (filter == Kevent.EVFILT_SIGNAL) {
          checkStdinCloses();
@@ -235,15 +240,18 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
          if (ident == osxProcess.getStdout().get()) {
             boolean userWantsMore = osxProcess.readStdout(available);
             if ((kevent.flags & Kevent.EV_EOF) != 0) {
+               LOGGER.debug("process(): EV_EOF on stdout({}) detected for {}", ident, osxProcess.getUid());
                osxProcess.readStdout(-1);
             }
             else if (userWantsMore) {
-               // We could use processEvents here and overwrite just the first entry, but this probably doesn't happen
-               // enough to warrant that optimization.
-               // Kevent[] events = (Kevent[]) new Kevent().toArray(1);
-               processEvents[0].EV_SET(osxProcess.getStdout().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
+               LOGGER.debug("process(): action(EVFILT_READ) EV_ADD | EV_ONESHOT on stdout({}) for {}", ident, osxProcess.getUid());
+
+               processEvents[0].EV_SET(osxProcess.getStdout().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT, 0, 0l,
                                        Pointer.createConstant(osxProcess.getUid()));
                registerEvents(processEvents, 1);               
+            }
+            else {
+               LOGGER.debug("process(): process for {} requested no more data on stdout({})", osxProcess.getUid(), ident);               
             }
          }
          else if (ident == osxProcess.getStderr().get()) {
@@ -281,6 +289,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
       {
          cleanupProcess(osxProcess);
          int status = kevent.data.intValue();
+         LOGGER.debug("Process {} exited with status {}", osxProcess.getUid(), status);
          if (WIFEXITED(status)) {
             status = WEXITSTATUS(status);
             if (status == 127) {
@@ -325,7 +334,9 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
 
          for (OsxProcess process : processes) {
             // Listen for process exit (one-shot event)
-            events[0].EV_SET((long) process.getPid(), Kevent.EVFILT_PROC, Kevent.EV_ADD | Kevent.EV_RECEIPT | Kevent.EV_ONESHOT, Kevent.NOTE_EXIT | Kevent.NOTE_EXITSTATUS, 0l,
+            LOGGER.debug("action(EVFILT_PROC) EV_ADD | EV_ONESHOT | NOTE_EXIT | NOTE_EXITSTATUS for process with ident {}", process.getUid());
+
+            events[0].EV_SET((long) process.getPid(), Kevent.EVFILT_PROC, Kevent.EV_ADD | Kevent.EV_ONESHOT, 0 /*Kevent.NOTE_EXIT | Kevent.NOTE_EXITSTATUS*/, 0l,
                              Pointer.createConstant(process.getUid()));
             
             try {
