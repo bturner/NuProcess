@@ -281,7 +281,7 @@ public class CatTest
       Utf8DecodingListener processListener = new Utf8DecodingListener(semaphore, "", true);
       NuProcessBuilder pb = new NuProcessBuilder(processListener, command, "foo.txt");
       pb.setCwd(tmpPath);
-      pb.start().want(Stream.STDOUT);
+      pb.start();
       semaphore.acquireUninterruptibly();
       Assert.assertEquals("Output mismatch", message, processListener.decodedStdout.toString());
       Assert.assertEquals("Exit code mismatch", 0, processListener.exitCode);
@@ -419,6 +419,7 @@ public class CatTest
       {
          this.nuProcess = nuProcess;
          nuProcess.want(Stream.STDIN);
+         nuProcess.want(Stream.STDOUT);
       }
 
       @Override

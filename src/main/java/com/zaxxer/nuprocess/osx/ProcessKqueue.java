@@ -90,8 +90,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
          return;
       }
 
-      int pid = System.identityHashCode(process);
-      pidToProcessMap.put(pid, process);
+      pidToProcessMap.put(process.getUid(), process);
 
       try {
          registerProcess.put(process);
@@ -102,7 +101,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
          }
       }
       catch (InterruptedException e) {
-         pidToProcessMap.remove(pid);
+         pidToProcessMap.remove(process.getUid());
          throw new RuntimeException("Interrupted during process registration");
       }
    }
@@ -243,7 +242,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
                // enough to warrant that optimization.
                // Kevent[] events = (Kevent[]) new Kevent().toArray(1);
                processEvents[0].EV_SET(osxProcess.getStdout().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
-                                       Pointer.createConstant(System.identityHashCode(osxProcess)));
+                                       Pointer.createConstant(osxProcess.getUid()));
                registerEvents(processEvents, 1);               
             }
          }
@@ -255,7 +254,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
             else if (userWantsMore) {
                // Kevent[] events = (Kevent[]) new Kevent().toArray(1);
                processEvents[0].EV_SET(osxProcess.getStderr().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
-                                       Pointer.createConstant(System.identityHashCode(osxProcess)));
+                                       Pointer.createConstant(osxProcess.getUid()));
                registerEvents(processEvents, 1);               
             }
          }
@@ -274,7 +273,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
          if (userWantsMore && stdinFd != -1) {
             // Kevent[] events = (Kevent[]) new Kevent().toArray(1);
             processEvents[0].EV_SET(osxProcess.getStdin().get(), Kevent.EVFILT_WRITE, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
-                                    Pointer.createConstant(System.identityHashCode(osxProcess)));
+                                    Pointer.createConstant(osxProcess.getUid()));
             registerEvents(processEvents, 1);
          }
       }
@@ -327,7 +326,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
          for (OsxProcess process : processes) {
             // Listen for process exit (one-shot event)
             events[0].EV_SET((long) process.getPid(), Kevent.EVFILT_PROC, Kevent.EV_ADD | Kevent.EV_RECEIPT | Kevent.EV_ONESHOT, Kevent.NOTE_EXIT | Kevent.NOTE_EXITSTATUS, 0l,
-                             Pointer.createConstant(System.identityHashCode(process)));
+                             Pointer.createConstant(process.getUid()));
             
             try {
                registerEvents(events, 1);
@@ -393,7 +392,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
 
          if (fd != -1) {
             kevents[numKevents].EV_SET(fd, eventFilter, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
-                                       Pointer.createConstant(System.identityHashCode(process)));
+                                       Pointer.createConstant(process.getUid()));
             numKevents++;
          }
       }
@@ -406,7 +405,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
       LibC.waitpid(osxProcess.getPid(), new IntByReference(), LibC.WNOHANG);
 
       // If this is the last process in the map, this thread will cleanly shut down.
-      pidToProcessMap.remove(System.identityHashCode(osxProcess));
+      pidToProcessMap.remove(osxProcess.getUid());
       if (!wantsStdin.isEmpty()) {
          while (wantsStdin.remove(osxProcess)) {
             continue;

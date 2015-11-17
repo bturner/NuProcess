@@ -42,6 +42,12 @@ public class FastExitingProcessTest
       public Exception stdoutException;
 
       @Override
+      public void onStart(NuProcess nuProcess)
+      {
+         nuProcess.want(Stream.STDOUT);
+      }
+
+      @Override
       public void onExit(int exitCode)
       {
          this.exitCode = exitCode;
@@ -76,7 +82,8 @@ public class FastExitingProcessTest
          process = new NuProcessBuilder(handler, "echo", "hello").start();
       }
 
-      process.want(Stream.STDOUT);
+      TimeUnit.SECONDS.sleep(2);
+
       int retVal = process.waitFor(Long.MAX_VALUE, TimeUnit.SECONDS);
 
       assertThat("Process should exit cleanly", retVal, equalTo(0));

@@ -76,14 +76,16 @@ public interface NuProcess
     * will result in the {@link NuProcessHandler#onStdout} or {@link NuProcessHandler#onStderr} 
     * callback method of the process handler being called respectively when output
     * is available to be read.
+    *
+    * @param stream the {@link Stream} that the caller wants to read/write
     */
    void want(Stream stream);
 
    /**
     * Performs a "direct write" rather than expressing a desire to write using
-    * {@link #wantWrite} and performing the write in a callback. Be careful
+    * {@link #want(Stream)} and performing the write in a callback. Be careful
     * mixing this paradigm with the asynchronous paradigm imposed by
-    * {@link #wantWrite()}.
+    * {@link #want(Stream)}.
     * <p>
     * This method returns immediately and the write of the data occurs on the
     * asynchronous processing thread. You can perform multiple

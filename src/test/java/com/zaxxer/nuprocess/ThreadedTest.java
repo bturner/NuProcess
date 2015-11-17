@@ -3,9 +3,11 @@ package com.zaxxer.nuprocess;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.Adler32;
 
+import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
@@ -27,7 +29,7 @@ public class ThreadedTest
 
       ArrayList<Thread> threads = new ArrayList<Thread>();
       int threadCount = 4;
-      int procCount = 50;
+      int procCount = 25;
 
       for (int ii = 0; ii < threadCount; ii++) {
          MyThread mt = new MyThread(ii, procCount);
@@ -37,7 +39,7 @@ public class ThreadedTest
       }
 
       for (Thread th : threads) {
-         th.join(TimeUnit.SECONDS.toMillis(20));
+         th.join(TimeUnit.SECONDS.toMillis(30));
       }
 
       System.err.println("Completed threadTest1()");
@@ -54,12 +56,11 @@ public class ThreadedTest
          this.procCount = procCount;
       }
 
-      public void startProcess(int PROCESSES)
+      public void startProcess(int PROCESSES) throws InterruptedException
       {
          String command = "/bin/cat";
 
          long start = System.currentTimeMillis();
-         long maxFreeMem = 0;
 
          NuProcessBuilder pb = new NuProcessBuilder(Arrays.asList(command));
 
@@ -70,9 +71,11 @@ public class ThreadedTest
             for (int i = 0; i < PROCESSES; i++) {
                handlers[i] = new LottaProcessHandler();
                pb.setProcessListener(handlers[i]);
+               // System.err.printf("  thread %d starting process %d...\n", id, i + 1);
                processes[i] = pb.start();
                processes[i].want(Stream.STDOUT);
-               // System.err.printf("  thread %d starting process %d: %s\n", id, i + 1, processes[i].toString());
+               processes[i].want(Stream.STDERR);
+               // System.err.printf("  thread %d started process %d: %s\n", id, i + 1, processes[i].toString());
             }
 
             // Kick all of the processes to start going
@@ -81,35 +84,38 @@ public class ThreadedTest
                process.want(Stream.STDIN);
             }
 
-            for (NuProcess process : processes) {
-               try {
-                  maxFreeMem = Math.max(maxFreeMem, Runtime.getRuntime().freeMemory());
-                  process.waitFor(90, TimeUnit.SECONDS);
-               }
-               catch (InterruptedException ex) {
-                  ex.printStackTrace();
+            ArrayList<NuProcess> procList = new ArrayList<>(Arrays.asList(processes));
+            while (!procList.isEmpty()) {
+               Iterator<NuProcess> iterator = procList.iterator();
+               while (iterator.hasNext()) {
+                  NuProcess process = iterator.next();
+                  int rc = process.waitFor(250, TimeUnit.MILLISECONDS);
+                  if (rc != Integer.MIN_VALUE) {
+                     // System.err.println(process + " exited with rc=" + rc);
+                     
+                     iterator.remove();
+                  }
+                  // System.err.println("Still waiting for " + process);
                }
             }
 
             for (LottaProcessHandler handler : handlers) {
-               if (handler.getAdler() != 4237270634l) {
-                  System.err.println("Adler32 mismatch between written and read");
-                  System.exit(-1);
-               }
-               else if (handler.getExitCode() != 0) {
-                  System.err.println("Exit code not zero (0)");
-               }
+               Assert.assertEquals("Adler32 mismatch", 4237270634L, handler.getAdler() );
             }
          }
 
-         System.out.printf(this.id + " Maximum memory used: %d\n", Runtime.getRuntime().totalMemory() - maxFreeMem);
          System.out.printf(this.id + " Total execution time (ms): %d\n", (System.currentTimeMillis() - start));
       }
 
       @Override
       public void run()
       {
-         this.startProcess(this.procCount);
+         try {
+            this.startProcess(this.procCount);
+         }
+         catch (InterruptedException e){
+            e.printStackTrace();
+         }
       }
    }
 
@@ -157,11 +163,13 @@ public class ThreadedTest
          buffer.get(bytes);
          readAdler32.update(bytes);
 
-         if (size == LIMIT) {
-            nuProcess.closeStdin(true);
-         }
+//         if (size == LIMIT) {
+//            nuProcess.closeStdin(true);
+//            size = Integer.MAX_VALUE;
+//         }
 
-         return true;
+         // System.err.println(nuProcess + " adler32: " + readAdler32.getValue());
+         return !closed && (size < LIMIT);
       }
 
       @Override
@@ -169,7 +177,13 @@ public class ThreadedTest
       {
          buffer.put(bytes);
          buffer.flip();
-         return (++writes < WRITES);
+
+         boolean close = (++writes >= WRITES);
+         if (close) {
+            nuProcess.closeStdin(false);
+         }
+
+         return !close;
       }
 
       int getExitCode()
