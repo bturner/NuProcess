@@ -63,7 +63,9 @@ public abstract class BasePosixProcess implements NuProcess
    protected AtomicInteger exitCode;
    protected CountDownLatch exitPending;
 
-   protected AtomicBoolean userWantsWrite;
+   protected final AtomicBoolean isWantStdin;
+   protected final AtomicBoolean isWantStdout;
+   protected final AtomicBoolean isWantStderr;
 
    // ******* Input/Output Buffers
    protected ByteBuffer outBuffer;
@@ -71,9 +73,9 @@ public abstract class BasePosixProcess implements NuProcess
    protected ByteBuffer inBuffer;
 
    // ******* Stdin/Stdout/Stderr pipe handles
-   protected AtomicInteger stdin;
-   protected AtomicInteger stdout;
-   protected AtomicInteger stderr;
+   protected final AtomicInteger stdin;
+   protected final AtomicInteger stdout;
+   protected final AtomicInteger stderr;
    protected volatile int stdinWidow;
    protected volatile int stdoutWidow;
    protected volatile int stderrWidow;
@@ -83,6 +85,7 @@ public abstract class BasePosixProcess implements NuProcess
    protected boolean errClosed;
 
    private ConcurrentLinkedQueue<ByteBuffer> pendingWrites;
+   private boolean hasProcessExited;
 
    // Launches threads under which changes to cwd do not affect the cwd of the process.
    public static class LinuxCwdThreadFactory implements ThreadFactory
@@ -153,7 +156,9 @@ public abstract class BasePosixProcess implements NuProcess
    protected BasePosixProcess(NuProcessHandler processListener)
    {
       this.processHandler = processListener;
-      this.userWantsWrite = new AtomicBoolean();
+      this.isWantStdin = new AtomicBoolean();
+      this.isWantStdout = new AtomicBoolean();
+      this.isWantStderr = new AtomicBoolean();
       this.cleanlyExitedBeforeProcess = new AtomicBoolean();
       this.exitCode = new AtomicInteger();
       this.exitPending = new CountDownLatch(1);
@@ -216,8 +221,8 @@ public abstract class BasePosixProcess implements NuProcess
       }
       catch (RuntimeException re) {
          // TODO remove from event processor pid map?
-         re.printStackTrace(System.err);
-         onExit(Integer.MIN_VALUE);
+         exitCode.set(Integer.MIN_VALUE);
+         onExit();
          return null;
       }
       finally {
@@ -318,7 +323,7 @@ public abstract class BasePosixProcess implements NuProcess
       case STDIN:
          fd = stdin.get();
          if (fd != -1) {
-            userWantsWrite.set(true);
+            isWantStdin.set(true);
             myProcessor.queueWrite(this);
          }
          else {
@@ -328,12 +333,14 @@ public abstract class BasePosixProcess implements NuProcess
       case STDOUT:
          fd = stdout.get();
          if (fd != -1) {
+            isWantStdout.set(true);
             myProcessor.queueRead(this, Stream.STDOUT);
          }
          break;
       case STDERR:
          fd = stderr.get();
          if (fd != -1) {
+            isWantStderr.set(true);
             myProcessor.queueRead(this, Stream.STDERR);
          }
          break;
@@ -415,6 +422,41 @@ public abstract class BasePosixProcess implements NuProcess
       return stderr;
    }
 
+   public boolean isStdoutClosed()
+   {
+      return outClosed;
+   }
+
+   public boolean isStderrClosed()
+   {
+      return errClosed;
+   }
+
+   public boolean isWantStdout()
+   {
+      return isWantStdout.get();
+   }
+
+   public boolean isWantStderr()
+   {
+      return isWantStderr.get();
+   }
+   
+   public void markProcessExited()
+   {
+      hasProcessExited = true;
+   }
+
+   public boolean isProcessExited()
+   {
+      return hasProcessExited;
+   }
+
+   public void setExitCode(int exitCode)
+   {
+      this.exitCode.set(exitCode);
+   }
+
    public boolean isSoftExit()
    {
       return (IS_SOFTEXIT_DETECTION && outClosed && errClosed);
@@ -435,7 +477,7 @@ public abstract class BasePosixProcess implements NuProcess
       return (int) (key & 0xffffffff);
    }
 
-   public void onExit(int statusCode)
+   public void onExit()
    {
       if (exitPending.getCount() == 0) {
          // TODO: handle SIGCHLD
@@ -448,7 +490,6 @@ public abstract class BasePosixProcess implements NuProcess
          close(stderr);
 
          isRunning = false;
-         exitCode.set(statusCode);
 
          if (outBuffer != null && !outClosed) {
             LOGGER.debug("onExit(): outBuffer != null && !outClosed, calling onStdout() with closed=true");
@@ -461,8 +502,8 @@ public abstract class BasePosixProcess implements NuProcess
             processHandler.onStderr(errBuffer, true);
          }
 
-         if (statusCode != Integer.MAX_VALUE - 1) {
-            processHandler.onExit(statusCode);
+         if (exitCode.get() != Integer.MAX_VALUE - 1) {
+            processHandler.onExit(exitCode.get());
          }
       }
       catch (Exception e) {
@@ -481,6 +522,8 @@ public abstract class BasePosixProcess implements NuProcess
 
    public boolean readStdout(int availability)
    {
+      isWantStdout.set(false);
+
       if (outClosed || availability == 0) {
          return true;
       }
@@ -512,6 +555,8 @@ public abstract class BasePosixProcess implements NuProcess
          outBuffer.limit(outBuffer.position() + read);
          outBuffer.position(0);
          boolean more = processHandler.onStdout(outBuffer, false);
+
+         isWantStdout.set(more);
          outBuffer.compact();
          return more;
       }
@@ -524,6 +569,8 @@ public abstract class BasePosixProcess implements NuProcess
 
    public boolean readStderr(int availability)
    {
+      isWantStderr.set(false);
+
       if (errClosed || availability == 0) {
          return true;
       }
@@ -555,6 +602,8 @@ public abstract class BasePosixProcess implements NuProcess
          errBuffer.limit(errBuffer.position() + read);
          errBuffer.position(0);
          boolean more = processHandler.onStderr(errBuffer, false);
+
+         isWantStderr.set(more);
          errBuffer.compact();
          return more;
       }
@@ -604,7 +653,7 @@ public abstract class BasePosixProcess implements NuProcess
          if (byteBuffer == STDIN_CLOSED_PENDING_WRITE_TOMBSTONE) {
             // We've written everything the user requested, and the user wants to close stdin now.
             closeStdin(true);
-            userWantsWrite.set(false);
+            isWantStdin.set(false);
             pendingWrites.clear();
             return false;
          } else if (byteBuffer.remaining() > BUFFER_CAPACITY) {
@@ -625,14 +674,14 @@ public abstract class BasePosixProcess implements NuProcess
          }
       }
 
-      if (!userWantsWrite.get()) {
+      if (!isWantStdin.get()) {
          return false;
       }
 
       try {
          inBuffer.clear();
          boolean wantMore = processHandler.onStdinReady(inBuffer);
-         userWantsWrite.set(wantMore);
+         isWantStdin.set(wantMore);
          if (inBuffer.hasRemaining() && availability > 0) {
             // Recurse
             return writeStdin(availability);

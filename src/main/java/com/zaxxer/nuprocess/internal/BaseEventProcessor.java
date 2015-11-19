@@ -106,7 +106,8 @@ public abstract class BaseEventProcessor<T extends BasePosixProcess> implements 
       IntByReference exitCode = new IntByReference();
       for (T process : processes) {
          LibC.kill(process.getPid(), LibC.SIGTERM);
-         process.onExit(Integer.MAX_VALUE - 1);
+         process.setExitCode(Integer.MAX_VALUE - 1);
+         process.onExit();
          LibC.waitpid(process.getPid(), exitCode, LibC.WNOHANG);
       }
    }

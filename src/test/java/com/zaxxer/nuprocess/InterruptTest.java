@@ -170,7 +170,7 @@ public class InterruptTest
                for (int i = 0; i < 50; i++) {
                   int exit = deadProcs.get(i).waitFor(1, TimeUnit.SECONDS);
                   if (!System.getProperty("os.name").toLowerCase().contains("win")) {
-                     Assert.assertEquals("Process exit code did not match", exit, 15);
+                     Assert.assertEquals("Process exit code did not match", 15, exit);
                   }
                   else {
                      Assert.assertTrue("Process exit code did not match", (exit != 0 || exit == Integer.MAX_VALUE));

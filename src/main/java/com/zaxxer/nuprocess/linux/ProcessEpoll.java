@@ -317,7 +317,7 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
       //        linuxProcess.close(linuxProcess.getStderr());
 
       if (linuxProcess.cleanlyExitedBeforeProcess.get()) {
-         linuxProcess.onExit(0);
+         linuxProcess.onExit();
          return;
       }
 
@@ -328,25 +328,28 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          deadPool.add(linuxProcess);
       }
       else if (rc < 0) {
-         linuxProcess.onExit((Native.getLastError() == LibC.ECHILD) ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+         linuxProcess.setExitCode((Native.getLastError() == LibC.ECHILD) ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+         linuxProcess.onExit();
       }
       else {
          int status = ret.getValue();
          if (WIFEXITED(status)) {
             status = WEXITSTATUS(status);
             if (status == 127) {
-               linuxProcess.onExit(Integer.MIN_VALUE);
+               linuxProcess.setExitCode(Integer.MIN_VALUE);
             }
             else {
-               linuxProcess.onExit(status);
+               linuxProcess.setExitCode(status);
             }
          }
          else if (WIFSIGNALED(status)) {
-            linuxProcess.onExit(WTERMSIG(status));
+            linuxProcess.setExitCode(WTERMSIG(status));
          }
          else {
-            linuxProcess.onExit(Integer.MIN_VALUE);
+            linuxProcess.setExitCode(Integer.MIN_VALUE);
          }
+
+         linuxProcess.onExit();
       }
    }
 
@@ -367,7 +370,8 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
 
          iterator.remove();
          if (rc < 0) {
-            process.onExit((Native.getLastError() == LibC.ECHILD) ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+            process.setExitCode((Native.getLastError() == LibC.ECHILD) ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+            process.onExit();
             continue;
          }
 
@@ -375,18 +379,20 @@ class ProcessEpoll extends BaseEventProcessor<LinuxProcess>
          if (WIFEXITED(status)) {
             status = WEXITSTATUS(status);
             if (status == 127) {
-               process.onExit(Integer.MIN_VALUE);
+               process.setExitCode(Integer.MIN_VALUE);
             }
             else {
-               process.onExit(status);
+               process.setExitCode(status);
             }
          }
          else if (WIFSIGNALED(status)) {
-            process.onExit(WTERMSIG(status));
+            process.setExitCode(WTERMSIG(status));
          }
          else {
-            process.onExit(Integer.MIN_VALUE);
+            process.setExitCode(Integer.MIN_VALUE);
          }
+
+         process.onExit();
       }
    }
 }

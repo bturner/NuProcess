@@ -236,35 +236,29 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
 
       if (filter == Kevent.EVFILT_READ) // stdout/stderr data available to read
       {
-         int available = kevent.data.intValue();
+         final int available = kevent.data.intValue();
+         boolean userWantsMore = false;
          if (ident == osxProcess.getStdout().get()) {
-            boolean userWantsMore = osxProcess.readStdout(available);
+            userWantsMore = osxProcess.readStdout(available);
             if ((kevent.flags & Kevent.EV_EOF) != 0) {
                LOGGER.debug("process(): EV_EOF on stdout({}) detected for {}", ident, osxProcess.getUid());
-               osxProcess.readStdout(-1);
-            }
-            else if (userWantsMore) {
-               LOGGER.debug("process(): action(EVFILT_READ) EV_ADD | EV_ONESHOT on stdout({}) for {}", ident, osxProcess.getUid());
-
-               processEvents[0].EV_SET(osxProcess.getStdout().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT, 0, 0l,
-                                       Pointer.createConstant(osxProcess.getUid()));
-               registerEvents(processEvents, 1);               
-            }
-            else {
-               LOGGER.debug("process(): process for {} requested no more data on stdout({})", osxProcess.getUid(), ident);               
+               userWantsMore = osxProcess.readStdout(-1);
             }
          }
          else if (ident == osxProcess.getStderr().get()) {
-            boolean userWantsMore = osxProcess.readStderr(available);
+            userWantsMore = osxProcess.readStderr(available);
             if ((kevent.flags & Kevent.EV_EOF) != 0) {
-               osxProcess.readStderr(-1);
+               userWantsMore = osxProcess.readStderr(-1);
             }
-            else if (userWantsMore) {
-               // Kevent[] events = (Kevent[]) new Kevent().toArray(1);
-               processEvents[0].EV_SET(osxProcess.getStderr().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT | Kevent.EV_RECEIPT, 0, 0l,
-                                       Pointer.createConstant(osxProcess.getUid()));
-               registerEvents(processEvents, 1);               
-            }
+         }
+
+         if (userWantsMore) {
+            LOGGER.debug("process(): action(EVFILT_READ) EV_ADD | EV_ONESHOT on stdout({}) for {}", ident, osxProcess.getUid());
+            processEvents[0].EV_SET(osxProcess.getStdout().get(), Kevent.EVFILT_READ, Kevent.EV_ADD | Kevent.EV_ONESHOT, 0, 0L, Pointer.createConstant(osxProcess.getUid()));
+            registerEvents(processEvents, 1);               
+         }
+         else {
+            LOGGER.debug("process(): process for {} requested no more data on stdout({})", osxProcess.getUid(), ident);
          }
       }
       else if (filter == Kevent.EVFILT_WRITE && ident == osxProcess.getStdin().get()) // Room in stdin pipe available to write
@@ -285,26 +279,31 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
             registerEvents(processEvents, 1);
          }
       }
-      else if ((kevent.fflags & Kevent.NOTE_EXIT) != 0) // process has exited System.gc()
-      {
-         cleanupProcess(osxProcess);
+      else if ((kevent.fflags & Kevent.NOTE_EXIT) != 0) { // process has exited
          int status = kevent.data.intValue();
          LOGGER.debug("Process {} exited with status {}", osxProcess.getUid(), status);
+         osxProcess.markProcessExited();
          if (WIFEXITED(status)) {
             status = WEXITSTATUS(status);
             if (status == 127) {
-               osxProcess.onExit(Integer.MIN_VALUE);
+               osxProcess.setExitCode(Integer.MIN_VALUE);
             }
             else {
-               osxProcess.onExit(status);
+               osxProcess.setExitCode(status);
             }
          }
          else if (WIFSIGNALED(status)) {
-            osxProcess.onExit(WTERMSIG(status));
+            osxProcess.setExitCode(WTERMSIG(status));
          }
          else {
-            osxProcess.onExit(status);
+            osxProcess.setExitCode(status);
          }
+      }
+
+      if (osxProcess.isProcessExited() &&
+          ((!osxProcess.isWantStdout() || osxProcess.isStdoutClosed()) && (!osxProcess.isWantStderr() || osxProcess.isStderrClosed()))) {
+         cleanupProcess(osxProcess);
+         osxProcess.onExit();
       }
    }
 
@@ -336,7 +335,7 @@ final class ProcessKqueue extends BaseEventProcessor<OsxProcess>
             // Listen for process exit (one-shot event)
             LOGGER.debug("action(EVFILT_PROC) EV_ADD | EV_ONESHOT | NOTE_EXIT | NOTE_EXITSTATUS for process with ident {}", process.getUid());
 
-            events[0].EV_SET((long) process.getPid(), Kevent.EVFILT_PROC, Kevent.EV_ADD | Kevent.EV_ONESHOT, 0 /*Kevent.NOTE_EXIT | Kevent.NOTE_EXITSTATUS*/, 0l,
+            events[0].EV_SET((long) process.getPid(), Kevent.EVFILT_PROC, Kevent.EV_ADD | Kevent.EV_ONESHOT, Kevent.NOTE_EXIT | Kevent.NOTE_EXITSTATUS, 0l,
                              Pointer.createConstant(process.getUid()));
             
             try {
